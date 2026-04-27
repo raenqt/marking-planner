@@ -44,6 +44,13 @@ class TaskType(db.Model):
     time_per_script = db.Column(db.Integer, default=20)
     colour = db.Column(db.String(7), default='#4a90a4')
 
+class MarkingEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.String(32), db.ForeignKey('batch.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    count = db.Column(db.Integer, default=1)
+    marked_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 class SavedSchedule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
@@ -61,11 +68,24 @@ class Batch(db.Model):
     deadline = db.Column(db.String(10), nullable=False)
     override_time = db.Column(db.Integer, nullable=True)
     max_per_sitting = db.Column(db.Integer, default=5)
+    notes = db.Column(db.Text, default='')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 with app.app_context():
     db.create_all()
+    # Add columns that may be missing from existing databases
+    from sqlalchemy import text
+    with db.engine.connect() as _conn:
+        for _sql in [
+            'ALTER TABLE batch ADD COLUMN notes TEXT DEFAULT ""',
+            'ALTER TABLE batch ADD COLUMN updated_at DATETIME',
+        ]:
+            try:
+                _conn.execute(text(_sql))
+                _conn.commit()
+            except Exception:
+                pass
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -260,6 +280,7 @@ def update_batch(batch_id):
     b.deadline = body.get('deadline', b.deadline)
     b.override_time = body.get('overrideTime')
     b.max_per_sitting = int(body.get('maxPerSitting', b.max_per_sitting))
+    b.notes = body.get('notes', b.notes or '')
     b.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(_batch_to_dict(b))
@@ -276,9 +297,49 @@ def _batch_to_dict(b):
     return {'id': b.id, 'taskTypeId': b.task_type_id, 'numScripts': b.num_scripts,
             'completedScripts': b.completed_scripts, 'deadline': b.deadline,
             'overrideTime': b.override_time, 'maxPerSitting': b.max_per_sitting,
+            'notes': b.notes or '',
             'createdAt': b.created_at.isoformat() if b.created_at else None}
 
+@app.route('/api/batches/<batch_id>/history', methods=['GET'])
+@login_required
+def get_batch_history(batch_id):
+    Batch.query.filter_by(id=batch_id, user_id=current_user.id).first_or_404()
+    entries = MarkingEntry.query.filter_by(batch_id=batch_id)\
+        .order_by(MarkingEntry.marked_at.desc()).all()
+    return jsonify([{'count': e.count, 'markedAt': e.marked_at.isoformat()} for e in entries])
+
+@app.route('/api/batches/<batch_id>/history', methods=['POST'])
+@login_required
+def add_batch_history(batch_id):
+    Batch.query.filter_by(id=batch_id, user_id=current_user.id).first_or_404()
+    body = request.json
+    db.session.add(MarkingEntry(batch_id=batch_id, user_id=current_user.id,
+                                count=body.get('count', 1)))
+    db.session.commit()
+    return jsonify({'success': True})
+
 # ============== Schedule Generation ==============
+
+@app.route('/api/pace-insights', methods=['GET'])
+@login_required
+def get_pace_insights():
+    entries = MarkingEntry.query.filter_by(user_id=current_user.id).all()
+    by_batch = {}
+    for entry in entries:
+        date_str = entry.marked_at.strftime('%Y-%m-%d')
+        by_batch.setdefault(entry.batch_id, {})
+        by_batch[entry.batch_id][date_str] = by_batch[entry.batch_id].get(date_str, 0) + entry.count
+    result = {}
+    for batch_id, sessions in by_batch.items():
+        counts = list(sessions.values())
+        total_sessions = len(counts)
+        total_marked = sum(counts)
+        result[batch_id] = {
+            'totalMarked': total_marked,
+            'sessions': total_sessions,
+            'avgPerSession': round(total_marked / total_sessions, 1) if total_sessions else 0,
+        }
+    return jsonify(result)
 
 @app.route('/api/schedule', methods=['GET'])
 @login_required
@@ -286,16 +347,34 @@ def get_saved_schedule():
     saved = SavedSchedule.query.filter_by(user_id=current_user.id).first()
     if not saved:
         return jsonify(None)
-    stale = any(
-        b.updated_at and b.updated_at > saved.generated_at
-        for b in Batch.query.filter_by(user_id=current_user.id).all()
-    )
+    user_batches = Batch.query.filter_by(user_id=current_user.id).all()
+    stale = any(b.updated_at and b.updated_at > saved.generated_at for b in user_batches)
+
+    # Detect scripts scheduled in past slots that weren't recorded
+    calendar_data = json.loads(saved.calendar_json)
+    local_date = request.args.get('localDate')
+    today_str = local_date if local_date else datetime.now().date().isoformat()
+    planned_past = {}
+    for date_str, day_data in calendar_data.items():
+        if date_str >= today_str:
+            continue
+        for slot in day_data.get('slots', []):
+            for assignment in slot.get('assignments', []):
+                bid = assignment['batchId']
+                planned_past[bid] = planned_past.get(bid, 0) + assignment['count']
+    missed = {
+        b.id: planned_past[b.id] - b.completed_scripts
+        for b in user_batches
+        if b.id in planned_past and b.completed_scripts < planned_past[b.id]
+    }
+
     return jsonify({
-        'calendar': json.loads(saved.calendar_json),
+        'calendar': calendar_data,
         'batches': json.loads(saved.batches_json),
         'summary': json.loads(saved.summary_json),
         'generatedAt': saved.generated_at.isoformat(),
-        'stale': stale
+        'stale': stale,
+        'missed': missed
     })
 
 @app.route('/api/generate-schedule', methods=['POST'])
@@ -309,7 +388,9 @@ def generate_schedule():
     task_types = {t.id: t for t in TaskType.query.filter_by(user_id=current_user.id).all()}
     batches = Batch.query.filter_by(user_id=current_user.id).all()
 
-    today = datetime.now().date()
+    body = request.json or {}
+    local_date = body.get('localDate')
+    today = datetime.strptime(local_date, '%Y-%m-%d').date() if local_date else datetime.now().date()
     week_monday = today - timedelta(days=today.weekday())
 
     available_slots = []

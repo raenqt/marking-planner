@@ -446,19 +446,25 @@ h3 {
 
 .batch-item {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
     padding: 1rem 1.25rem;
     background: var(--bg-card);
     border: 1.5px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     transition: box-shadow 0.2s, transform 0.2s;
+    gap: 0.75rem;
 }
 
 .batch-item:hover {
     box-shadow: var(--shadow-hover);
     transform: translateY(-1px);
+}
+
+.batch-item-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .batch-info {
@@ -514,6 +520,70 @@ h3 {
 }
 
 .batch-complete { opacity: 0.6; }
+
+.batch-notes-input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-family: inherit;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    resize: vertical;
+    min-height: 2.25rem;
+    transition: border-color 0.2s;
+}
+
+.batch-notes-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.1);
+    color: var(--text-primary);
+}
+
+.batch-notes-input::placeholder { color: var(--text-muted); }
+
+.batch-history-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.history-toggle-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    text-align: left;
+    transition: color 0.2s;
+}
+
+.history-toggle-btn:hover { color: var(--accent); }
+
+.batch-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.history-entry {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    padding: 0.3rem 0.5rem;
+    background: var(--bg-primary);
+    border-radius: 6px;
+}
+
+.history-entry span:last-child {
+    margin-left: auto;
+    color: var(--accent);
+    font-weight: 500;
+}
 
 .done-btn {
     padding: 0.25rem 0.875rem;
@@ -636,6 +706,55 @@ h3 {
 
 .summary-item { color: var(--text-secondary); }
 .summary-item strong { color: var(--accent); }
+
+/* Weekly capacity */
+.weekly-capacity-bar {
+    background: linear-gradient(135deg, #f0faf8, var(--bg-primary));
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.875rem 1.25rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.weekly-capacity-bar strong { color: var(--accent); }
+
+.day-capacity {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: rgba(42, 157, 143, 0.1);
+    padding: 0.2rem 0.6rem;
+    border-radius: 50px;
+}
+
+.slot-duration {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 0.1rem 0.45rem;
+    border-radius: 50px;
+    margin-left: 0.4rem;
+}
+
+/* Pace badge */
+.pace-badge {
+    font-size: 0.75rem;
+    color: var(--accent);
+    display: inline-block;
+    margin-top: 0.15rem;
+}
+
+/* Missed sessions banner */
+.missed-banner {
+    background: #f0f9ff;
+    border-color: #7ec8e3;
+    color: #1a4a5e;
+}
+
+.missed-banner a { color: var(--accent); }
 
 /* Stale schedule banner */
 .stale-banner {

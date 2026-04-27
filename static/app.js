@@ -7,6 +7,7 @@ let taskTypes = [];
 let batches = [];
 let weeklyTemplate = {};
 let lastSchedule = null;
+let paceInsights = {};
 
 // DOM Elements
 const tabBtns = document.querySelectorAll('.tab-btn');
@@ -20,11 +21,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadBatches();
     loadToday();
     loadSavedSchedule();
+    loadPaceInsights();
 });
 
 async function loadSavedSchedule() {
     try {
-        const saved = await api('/schedule');
+        const saved = await api(`/schedule?localDate=${localDateStr()}`);
         if (!saved) return;
         lastSchedule = saved;
         renderSchedule(saved);
@@ -109,10 +111,26 @@ function renderWeeklyTemplate() {
     const container = document.getElementById('days-container');
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-    container.innerHTML = days.map(day => `
+    let weeklyMinutes = 0;
+    for (const day of days) {
+        for (const slot of (weeklyTemplate[day] || [])) {
+            weeklyMinutes += slotDurationMin(slot.start, slot.end);
+        }
+    }
+
+    const weeklyBar = weeklyMinutes > 0
+        ? `<div class="weekly-capacity-bar">📅 Weekly marking capacity: <strong>${formatDuration(weeklyMinutes)}</strong></div>`
+        : '';
+
+    container.innerHTML = weeklyBar + days.map(day => {
+        const slots = weeklyTemplate[day] || [];
+        const dayMinutes = slots.reduce((sum, s) => sum + slotDurationMin(s.start, s.end), 0);
+
+        return `
         <div class="day-card" data-day="${day}">
             <div class="day-header">
                 <h3>${day}</h3>
+                ${dayMinutes > 0 ? `<span class="day-capacity">${formatDuration(dayMinutes)}</span>` : ''}
             </div>
             <div class="add-slot-form">
                 <label>From</label>
@@ -127,20 +145,23 @@ function renderWeeklyTemplate() {
                 <button onclick="addSlot('${day}')">Add Slot</button>
             </div>
             <div class="slots-list">
-                ${(weeklyTemplate[day] || []).map(slot => `
+                ${slots.map(slot => {
+                    const duration = slotDurationMin(slot.start, slot.end);
+                    return `
                     <div class="slot-item">
                         <div>
-                            <span class="slot-time">${formatTime(slot.start)} - ${formatTime(slot.end)}</span>
+                            <span class="slot-time">${formatTime(slot.start)} – ${formatTime(slot.end)}</span>
+                            <span class="slot-duration">${duration} min</span>
                             ${slot.label ? `<span class="slot-label-display">(${escapeHtml(slot.label)})</span>` : ''}
                         </div>
                         <div class="slot-actions">
                             <button class="delete-btn" onclick="deleteSlot('${day}', '${slot.id}')">Delete</button>
                         </div>
-                    </div>
-                `).join('')}
+                    </div>`;
+                }).join('')}
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
 async function addSlot(day) {
@@ -318,37 +339,119 @@ function renderBatches() {
         return;
     }
 
-    container.innerHTML = batches.map(batch => {
+    const sorted = [...batches].sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+
+    container.innerHTML = sorted.map(batch => {
         const type = taskTypes.find(t => t.id === batch.taskTypeId);
         const remaining = batch.numScripts - batch.completedScripts;
         const progress = Math.round((batch.completedScripts / batch.numScripts) * 100);
         const isComplete = remaining <= 0;
         const colour = type?.colour || '#ccc';
+        const daysLeft = Math.ceil((new Date(batch.deadline) - new Date()) / 86400000);
+        const urgency = daysLeft <= 3 ? 'deadline-urgent' : daysLeft <= 7 ? 'deadline-soon' : '';
+
+        const pace = paceInsights[batch.id];
+        const paceHTML = pace && pace.sessions > 0
+            ? `<span class="pace-badge">~${pace.avgPerSession}/session avg · ${pace.sessions} session${pace.sessions !== 1 ? 's' : ''}</span>`
+            : '';
 
         return `
             <div class="batch-item ${isComplete ? 'batch-complete' : ''}">
-                <div class="batch-info">
-                    <div class="batch-colour" style="background: ${colour}"></div>
-                    <div class="batch-details">
-                        <span class="batch-name">${escapeHtml(type?.name || 'Unknown')} — ${batch.numScripts} scripts</span>
-                        <span class="batch-meta">Deadline: ${formatDate(batch.deadline)} · ${batch.maxPerSitting} per sitting</span>
-                        <div class="batch-progress-bar">
-                            <div class="batch-progress-fill" style="width: ${progress}%; background: ${colour}"></div>
+                <div class="batch-item-main">
+                    <div class="batch-info">
+                        <div class="batch-colour" style="background: ${colour}"></div>
+                        <div class="batch-details">
+                            <span class="batch-name">${escapeHtml(type?.name || 'Unknown')} — ${batch.numScripts} scripts</span>
+                            <span class="batch-meta">
+                                <span class="${urgency}">${formatDate(batch.deadline)} (${daysLeft}d)</span>
+                                · ${batch.maxPerSitting} per sitting
+                            </span>
+                            <div class="batch-progress-bar">
+                                <div class="batch-progress-fill" style="width: ${progress}%; background: ${colour}"></div>
+                            </div>
+                            <span class="batch-progress-label">${batch.completedScripts} / ${batch.numScripts} done</span>
+                            ${paceHTML}
                         </div>
-                        <span class="batch-progress-label">${batch.completedScripts} / ${batch.numScripts} done</span>
+                    </div>
+                    <div class="batch-actions">
+                        ${isComplete
+                            ? '<span class="complete-badge">Complete</span>'
+                            : `<button class="done-btn" onclick="markScriptDone('${batch.id}')">+1 Done</button>`
+                        }
+                        <button class="edit-btn" onclick="openEditBatchModal('${batch.id}')">Edit</button>
+                        <button class="delete-btn" onclick="deleteBatch('${batch.id}')">Delete</button>
                     </div>
                 </div>
-                <div class="batch-actions">
-                    ${isComplete
-                        ? '<span class="complete-badge">Complete</span>'
-                        : `<button class="done-btn" onclick="markScriptDone('${batch.id}')">+1 Done</button>`
-                    }
-                    <button class="edit-btn" onclick="openEditBatchModal('${batch.id}')">Edit</button>
-                    <button class="delete-btn" onclick="deleteBatch('${batch.id}')">Delete</button>
+                <textarea class="batch-notes-input" placeholder="Add notes..."
+                    onblur="saveBatchNote('${batch.id}', this.value)"
+                    rows="1">${escapeHtml(batch.notes || '')}</textarea>
+                <div class="batch-history-wrap">
+                    <button class="history-toggle-btn" onclick="toggleHistory('${batch.id}', this)">📋 Show history</button>
+                    <div class="batch-history-list" id="history-${batch.id}" style="display:none"></div>
                 </div>
             </div>
         `;
     }).join('');
+}
+
+async function saveBatchNote(id, notes) {
+    const batch = batches.find(b => b.id === id);
+    if (!batch || (batch.notes || '') === notes) return;
+    try {
+        const updated = await api(`/batches/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ ...batch, notes })
+        });
+        batches[batches.findIndex(b => b.id === id)] = updated;
+    } catch (err) {
+        console.error('Failed to save note:', err);
+    }
+}
+
+async function toggleHistory(id, btn) {
+    const container = document.getElementById(`history-${id}`);
+    const isOpen = container.style.display !== 'none';
+    if (isOpen) {
+        container.style.display = 'none';
+        btn.textContent = '📋 Show history';
+        return;
+    }
+    container.style.display = 'block';
+    btn.textContent = '📋 Hide history';
+    if (container.dataset.loaded) return;
+    container.innerHTML = '<p class="text-muted" style="font-size:0.8rem;padding:0.5rem 0">Loading...</p>';
+    try {
+        const history = await api(`/batches/${id}/history`);
+        if (history.length === 0) {
+            container.innerHTML = '<p class="text-muted" style="font-size:0.8rem;padding:0.5rem 0">No history yet.</p>';
+        } else {
+            container.innerHTML = history.map(e => {
+                const d = new Date(e.markedAt);
+                return `<div class="history-entry">
+                    <span>${d.toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'})}</span>
+                    <span>${d.toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'})}</span>
+                    <span>${e.count} script${e.count !== 1 ? 's' : ''} marked</span>
+                </div>`;
+            }).join('');
+        }
+        container.dataset.loaded = 'true';
+    } catch (err) {
+        container.innerHTML = '<p class="text-muted" style="font-size:0.8rem">Could not load history.</p>';
+    }
+}
+
+async function recordHistory(id, count = 1) {
+    try {
+        await api(`/batches/${id}/history`, {
+            method: 'POST',
+            body: JSON.stringify({ count })
+        });
+        // Reset loaded flag so history refreshes next time it's opened
+        const container = document.getElementById(`history-${id}`);
+        if (container) delete container.dataset.loaded;
+    } catch (err) {
+        console.error('Failed to record history:', err);
+    }
 }
 
 async function markScriptDoneFromToday(id) {
@@ -360,8 +463,8 @@ async function markScriptDoneFromToday(id) {
             body: JSON.stringify({ ...batch, completedScripts: batch.completedScripts + 1 })
         });
         batches[batches.findIndex(b => b.id === id)] = updated;
+        recordHistory(id);
         renderBatches();
-        // Re-render today in place using the saved schedule (no refetch needed)
         if (lastSchedule) renderToday(lastSchedule);
     } catch (err) {
         alert('Failed to update: ' + err.message);
@@ -377,6 +480,7 @@ async function markScriptDone(id) {
             body: JSON.stringify({ ...batch, completedScripts: batch.completedScripts + 1 })
         });
         batches[batches.findIndex(b => b.id === id)] = updated;
+        recordHistory(id);
         renderBatches();
     } catch (err) {
         alert('Failed to update: ' + err.message);
@@ -492,7 +596,10 @@ async function deleteBatch(id) {
 
 document.getElementById('generate-btn').addEventListener('click', async () => {
     try {
-        const result = await api('/generate-schedule', { method: 'POST' });
+        const result = await api('/generate-schedule', {
+            method: 'POST',
+            body: JSON.stringify({ localDate: localDateStr() })
+        });
         lastSchedule = result;
         renderSchedule(result);
         showExportBtn(result.generatedAt);
@@ -519,7 +626,7 @@ document.getElementById('export-btn').addEventListener('click', exportToICal);
 async function loadToday() {
     const container = document.getElementById('today-container');
     try {
-        const schedule = await api('/schedule');
+        const schedule = await api(`/schedule?localDate=${localDateStr()}`);
         if (!schedule) {
             container.innerHTML = `
                 <div class="today-empty">
@@ -560,8 +667,10 @@ function renderToday(schedule) {
         ? new Date(nextDate + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })
         : null;
 
-    // Remaining work from live batch data
-    const activeBatches = batches.filter(b => b.numScripts - b.completedScripts > 0);
+    // Remaining work from live batch data, sorted by deadline proximity
+    const activeBatches = batches
+        .filter(b => b.numScripts - b.completedScripts > 0)
+        .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
 
     let sessionsHTML;
     if (!todayData || todayData.slots.length === 0) {
@@ -628,8 +737,17 @@ function renderToday(schedule) {
             <a href="#" onclick="event.preventDefault();document.querySelector('[data-tab=\\'schedule\\']').click()">Regenerate</a>
         </div>` : '';
 
+    const missedTotal = schedule.missed
+        ? Object.values(schedule.missed).reduce((s, n) => s + n, 0) : 0;
+    const missedHTML = missedTotal > 0 ? `
+        <div class="stale-banner missed-banner">
+            📋 <strong>${missedTotal} script${missedTotal !== 1 ? 's' : ''}</strong> from past sessions weren't recorded as done.
+            <a href="#" onclick="event.preventDefault();document.querySelector('[data-tab=\\'schedule\\']').click()">Regenerate to carry them forward</a>
+        </div>` : '';
+
     container.innerHTML = `
         ${staleHTML}
+        ${missedHTML}
         <div class="today-header">
             <div>
                 <div class="today-greeting">${greeting} 🦦</div>
@@ -784,7 +902,31 @@ function renderSchedule(result) {
     }).join('');
 }
 
+// ============== Pace Insights ==============
+
+async function loadPaceInsights() {
+    try {
+        paceInsights = await api('/pace-insights');
+        renderBatches();
+    } catch (err) {
+        console.error('Could not load pace insights:', err);
+    }
+}
+
 // ============== Utilities ==============
+
+function slotDurationMin(start, end) {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return (eh * 60 + em) - (sh * 60 + sm);
+}
+
+function formatDuration(minutes) {
+    if (minutes < 60) return `${minutes} min`;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
 
 function formatTo24Hour(hour, minute, ampm) {
     let h = parseInt(hour);
