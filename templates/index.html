@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marking Planner</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-brand">
+                <span class="header-otter">🦦</span>
+                <div class="header-title">
+                    <h1>Marking Planner</h1>
+                    <span class="header-tagline">Your friendly marking companion</span>
+                </div>
+                <div class="header-user">
+                    <span class="header-user-name">{{ user.name }}</span>
+                    <a href="{{ url_for('logout') }}" class="signout-btn">Sign out</a>
+                </div>
+            </div>
+            <nav class="tabs">
+                <button class="tab-btn active" data-tab="today">☀️ Today</button>
+                <button class="tab-btn" data-tab="weekly-template">📅 Weekly Template</button>
+                <button class="tab-btn" data-tab="task-types">🎨 Task Types</button>
+                <button class="tab-btn" data-tab="schedule">📚 Batches &amp; Schedule</button>
+            </nav>
+        </header>
+
+        <main>
+            <!-- Tab 1: Today -->
+            <section id="today" class="tab-content active">
+                <div id="today-container">
+                    <p class="text-muted">Loading...</p>
+                </div>
+            </section>
+
+            <!-- Tab 2: Weekly Template -->
+            <section id="weekly-template" class="tab-content">
+                <h2>Weekly Availability</h2>
+                <p class="section-desc">Set up your recurring weekly time slots for marking.</p>
+                <div id="days-container"></div>
+            </section>
+
+            <!-- Tab 3: Task Types -->
+            <section id="task-types" class="tab-content">
+                <h2>Task Types</h2>
+                <p class="section-desc">Manage the types of tasks you mark and their default times.</p>
+
+                <div class="form-card">
+                    <h3>Add Task Type</h3>
+                    <form id="task-type-form" class="inline-form">
+                        <input type="text" id="task-name" placeholder="Task name (e.g., Essay)" required>
+                        <input type="number" id="task-time" placeholder="Minutes" min="1" value="20" required>
+                        <input type="color" id="task-colour" value="#4a90a4" title="Colour">
+                        <button type="submit">Add</button>
+                    </form>
+                </div>
+
+                <div class="task-types-list" id="task-types-list"></div>
+            </section>
+
+            <!-- Tab 4: Marking Batches & Schedule -->
+            <section id="schedule" class="tab-content">
+                <h2>Marking Batches &amp; Schedule</h2>
+                <p class="section-desc">Add batches of scripts and generate your marking schedule.</p>
+
+                <!-- Summary Bar -->
+                <div id="summary-bar" class="summary-bar" style="display: none;">
+                    <span class="summary-item"><strong id="summary-total">0</strong> scripts remaining</span>
+                    <span class="summary-item"><strong id="summary-hours">0</strong> hours of marking</span>
+                    <span class="summary-item">Nearest deadline: <strong id="summary-deadline">-</strong></span>
+                </div>
+
+                <!-- Add Batch Form -->
+                <div class="form-card">
+                    <h3>Add Batch</h3>
+                    <form id="batch-form" class="inline-form">
+                        <select id="batch-task-type" required>
+                            <option value="">Select task type...</option>
+                        </select>
+                        <input type="number" id="batch-num" placeholder="Number of scripts" min="1" required>
+                        <input type="date" id="batch-deadline" required>
+                        <input type="number" id="batch-override-time" placeholder="Override time (min)" min="1">
+                        <div class="labeled-field">
+                            <label for="batch-max">Max per sitting</label>
+                            <input type="number" id="batch-max" min="1" value="5">
+                        </div>
+                        <button type="submit">Add Batch</button>
+                    </form>
+                </div>
+
+                <!-- Existing Batches -->
+                <div class="batches-list" id="batches-list"></div>
+
+                <!-- Generate / Export Buttons -->
+                <div class="actions">
+                    <button id="generate-btn" class="primary-btn">Generate Schedule</button>
+                    <button id="export-btn" class="secondary-btn" style="display:none;">Export to Calendar (.ics)</button>
+                </div>
+
+                <!-- Warnings -->
+                <div id="warnings-container"></div>
+
+                <!-- Calendar -->
+                <div id="calendar-container"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
