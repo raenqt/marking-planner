@@ -110,5 +110,12 @@
     </div>
 
     <script src="/static/app.js"></script>
+
+    {% if user.name == 'Jessica Kraak' %}
+    <div class="secret-otter">
+        <div class="secret-sign">Josh loves you! 💕</div>
+        <div class="secret-otter-emoji">🦦</div>
+    </div>
+    {% endif %}
 </body>
 </html>

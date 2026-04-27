@@ -2,6 +2,7 @@
 Marking Planner - Flask backend with multi-user support
 """
 import os
+import uuid
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
@@ -61,7 +62,7 @@ def load_user(user_id):
     return db.session.get(User, int(user_id))
 
 def generate_id():
-    return datetime.now().strftime("%Y%m%d%H%M%S%f")
+    return uuid.uuid4().hex
 
 # ============== Auth Routes ==============
 
@@ -121,6 +122,23 @@ def _default_task_types(user_id):
             for n, t, c in defaults]
 
 # ============== Main Route ==============
+
+
+@app.route('/dev-login')
+def dev_login():
+    if not app.debug:
+        return 'Not found', 404
+    dev_user = User.query.filter_by(email='dev@local').first()
+    if not dev_user:
+        dev_user = User(email='dev@local', name='Jessica Kraak',
+                        password_hash=generate_password_hash('dev'))
+        db.session.add(dev_user)
+        db.session.flush()
+        for t in _default_task_types(dev_user.id):
+            db.session.add(t)
+        db.session.commit()
+    login_user(dev_user)
+    return redirect(url_for('index'))
 
 @app.route('/')
 @login_required
