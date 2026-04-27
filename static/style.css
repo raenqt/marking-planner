@@ -185,7 +185,7 @@ h3 {
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
-    align-items: center;
+    align-items: flex-end;
 }
 
 .inline-form input,
@@ -616,6 +616,12 @@ h3 {
     transform: translateY(-1px);
 }
 
+.generated-at {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    align-self: center;
+}
+
 /* Summary Bar */
 .summary-bar {
     display: flex;
@@ -630,6 +636,26 @@ h3 {
 
 .summary-item { color: var(--text-secondary); }
 .summary-item strong { color: var(--accent); }
+
+/* Stale schedule banner */
+.stale-banner {
+    padding: 0.875rem 1.25rem;
+    background: #fff8ec;
+    border: 1.5px solid var(--warning);
+    border-radius: var(--radius);
+    color: #7a5200;
+    margin-bottom: 1.25rem;
+    font-size: 0.9rem;
+}
+
+.stale-banner a {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: none;
+    margin-left: 0.5rem;
+}
+
+.stale-banner a:hover { text-decoration: underline; }
 
 /* Warnings */
 .warning-banner {

@@ -19,7 +19,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadTaskTypes();
     await loadBatches();
     loadToday();
+    loadSavedSchedule();
 });
+
+async function loadSavedSchedule() {
+    try {
+        const saved = await api('/schedule');
+        if (!saved) return;
+        lastSchedule = saved;
+        renderSchedule(saved);
+        showExportBtn(saved.generatedAt);
+        renderStaleBanner(saved.stale);
+    } catch (err) {
+        console.error('Could not load saved schedule:', err);
+    }
+}
+
+function renderStaleBanner(stale) {
+    const existing = document.getElementById('schedule-stale-banner');
+    if (existing) existing.remove();
+    if (!stale) return;
+    const banner = document.createElement('div');
+    banner.id = 'schedule-stale-banner';
+    banner.className = 'stale-banner';
+    banner.innerHTML = `⚠️ Batches have changed since this schedule was generated. Regenerate to get an accurate plan.`;
+    document.getElementById('warnings-container').prepend(banner);
+}
 
 // Tab Switching
 function setupTabs() {
@@ -326,6 +351,23 @@ function renderBatches() {
     }).join('');
 }
 
+async function markScriptDoneFromToday(id) {
+    const batch = batches.find(b => b.id === id);
+    if (!batch) return;
+    try {
+        const updated = await api(`/batches/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ ...batch, completedScripts: batch.completedScripts + 1 })
+        });
+        batches[batches.findIndex(b => b.id === id)] = updated;
+        renderBatches();
+        // Re-render today in place using the saved schedule (no refetch needed)
+        if (lastSchedule) renderToday(lastSchedule);
+    } catch (err) {
+        alert('Failed to update: ' + err.message);
+    }
+}
+
 async function markScriptDone(id) {
     const batch = batches.find(b => b.id === id);
     if (!batch) return;
@@ -453,11 +495,22 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
         const result = await api('/generate-schedule', { method: 'POST' });
         lastSchedule = result;
         renderSchedule(result);
-        document.getElementById('export-btn').style.display = 'inline-block';
+        showExportBtn(result.generatedAt);
+        renderStaleBanner(false);
     } catch (err) {
         alert('Failed to generate schedule: ' + err.message);
     }
 });
+
+function showExportBtn(generatedAt) {
+    document.getElementById('export-btn').style.display = 'inline-block';
+    const ts = document.getElementById('schedule-generated-at');
+    if (generatedAt) {
+        const d = new Date(generatedAt);
+        ts.textContent = `Last generated: ${d.toLocaleDateString('en-AU', {day:'numeric',month:'short'})} at ${d.toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'})}`;
+        ts.style.display = 'inline';
+    }
+}
 
 document.getElementById('export-btn').addEventListener('click', exportToICal);
 
@@ -466,16 +519,20 @@ document.getElementById('export-btn').addEventListener('click', exportToICal);
 async function loadToday() {
     const container = document.getElementById('today-container');
     try {
-        const schedule = await api('/generate-schedule', { method: 'POST' });
+        const schedule = await api('/schedule');
+        if (!schedule) {
+            container.innerHTML = `
+                <div class="today-empty">
+                    <div style="font-size:3rem;margin-bottom:1rem">🦦</div>
+                    <p>No schedule yet! Set up your weekly slots, add marking batches,<br>
+                    then hit <strong>Generate Schedule</strong> in the Batches &amp; Schedule tab.</p>
+                </div>`;
+            return;
+        }
         lastSchedule = schedule;
         renderToday(schedule);
     } catch (err) {
-        container.innerHTML = `
-            <div class="today-empty">
-                <div style="font-size:3rem;margin-bottom:1rem">🦦</div>
-                <p>No schedule yet! Head to <strong>Weekly Template</strong> to set up your marking slots,<br>
-                then add batches in <strong>Batches &amp; Schedule</strong>.</p>
-            </div>`;
+        container.innerHTML = `<div class="today-empty"><p>Could not load schedule.</p></div>`;
     }
 }
 
@@ -552,7 +609,10 @@ function renderToday(schedule) {
                             <span class="batch-dot" style="background:${colour}"></span>
                             ${escapeHtml(type?.name || 'Unknown')}
                         </span>
-                        <span class="today-batch-deadline ${urgency}">${deadlineDays}d until deadline</span>
+                        <div style="display:flex;align-items:center;gap:0.5rem">
+                            <span class="today-batch-deadline ${urgency}">${deadlineDays}d to go</span>
+                            ${remaining > 0 ? `<button class="done-btn" onclick="markScriptDoneFromToday('${batch.id}')">+1 Done</button>` : '<span class="complete-badge">Complete</span>'}
+                        </div>
                     </div>
                     <div class="batch-progress-bar">
                         <div class="batch-progress-fill" style="width:${progress}%;background:${colour}"></div>
@@ -562,7 +622,14 @@ function renderToday(schedule) {
         }).join('');
     }
 
+    const staleHTML = schedule.stale ? `
+        <div class="stale-banner">
+            ⚠️ Your schedule may be out of date — you've marked scripts since it was last generated.
+            <a href="#" onclick="event.preventDefault();document.querySelector('[data-tab=\\'schedule\\']').click()">Regenerate</a>
+        </div>` : '';
+
     container.innerHTML = `
+        ${staleHTML}
         <div class="today-header">
             <div>
                 <div class="today-greeting">${greeting} 🦦</div>

@@ -3,6 +3,7 @@ Marking Planner - Flask backend with multi-user support
 """
 import os
 import uuid
+import json
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
@@ -43,6 +44,14 @@ class TaskType(db.Model):
     time_per_script = db.Column(db.Integer, default=20)
     colour = db.Column(db.String(7), default='#4a90a4')
 
+class SavedSchedule(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
+    calendar_json = db.Column(db.Text, nullable=False)
+    batches_json = db.Column(db.Text, nullable=False)
+    summary_json = db.Column(db.Text, nullable=False)
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 class Batch(db.Model):
     id = db.Column(db.String(32), primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -53,6 +62,7 @@ class Batch(db.Model):
     override_time = db.Column(db.Integer, nullable=True)
     max_per_sitting = db.Column(db.Integer, default=5)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 with app.app_context():
     db.create_all()
@@ -250,6 +260,7 @@ def update_batch(batch_id):
     b.deadline = body.get('deadline', b.deadline)
     b.override_time = body.get('overrideTime')
     b.max_per_sitting = int(body.get('maxPerSitting', b.max_per_sitting))
+    b.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(_batch_to_dict(b))
 
@@ -268,6 +279,24 @@ def _batch_to_dict(b):
             'createdAt': b.created_at.isoformat() if b.created_at else None}
 
 # ============== Schedule Generation ==============
+
+@app.route('/api/schedule', methods=['GET'])
+@login_required
+def get_saved_schedule():
+    saved = SavedSchedule.query.filter_by(user_id=current_user.id).first()
+    if not saved:
+        return jsonify(None)
+    stale = any(
+        b.updated_at and b.updated_at > saved.generated_at
+        for b in Batch.query.filter_by(user_id=current_user.id).all()
+    )
+    return jsonify({
+        'calendar': json.loads(saved.calendar_json),
+        'batches': json.loads(saved.batches_json),
+        'summary': json.loads(saved.summary_json),
+        'generatedAt': saved.generated_at.isoformat(),
+        'stale': stale
+    })
 
 @app.route('/api/generate-schedule', methods=['POST'])
 @login_required
@@ -356,11 +385,28 @@ def generate_schedule():
             })
 
     nearest_deadline = min((b['deadline'] for b in active_batches), default=None)
-    return jsonify({
-        'calendar': calendar, 'batches': active_batches,
-        'summary': {'totalRemaining': total_scripts_remaining,
-                    'totalHours': round(total_hours, 1), 'nearestDeadline': nearest_deadline}
-    })
+    summary = {'totalRemaining': total_scripts_remaining,
+               'totalHours': round(total_hours, 1), 'nearestDeadline': nearest_deadline}
+
+    # Persist the schedule
+    saved = SavedSchedule.query.filter_by(user_id=current_user.id).first()
+    if saved:
+        saved.calendar_json = json.dumps(calendar)
+        saved.batches_json = json.dumps(active_batches)
+        saved.summary_json = json.dumps(summary)
+        saved.generated_at = datetime.utcnow()
+    else:
+        db.session.add(SavedSchedule(
+            user_id=current_user.id,
+            calendar_json=json.dumps(calendar),
+            batches_json=json.dumps(active_batches),
+            summary_json=json.dumps(summary)
+        ))
+    db.session.commit()
+
+    generated_at = SavedSchedule.query.filter_by(user_id=current_user.id).first().generated_at
+    return jsonify({'calendar': calendar, 'batches': active_batches, 'summary': summary,
+                    'generatedAt': generated_at.isoformat()})
 
 
 def slot_duration_minutes(start, end):
